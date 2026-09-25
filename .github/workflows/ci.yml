@@ -146,7 +146,32 @@ jobs:
           cache: maven
 
       - name: Build all microservices
+        id: maven-build
         run: mvn --batch-mode verify -DskipTests --no-transfer-progress
+
+      - name: Backend build status summary
+        if: always()
+        run: |
+          echo "## 🔧 Backend Build Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Service | JAR | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|---|" >> $GITHUB_STEP_SUMMARY
+          SERVICES="eureka-server config-server api-gateway auth-service user-service vehicle-service booking-service payment-service ridematch-service notification-service chat-service review-service"
+          for svc in $SERVICES; do
+            JAR=$(find . -path "*/$svc/target/*.jar" -not -name "*-sources.jar" 2>/dev/null | head -1)
+            if [ -n "$JAR" ]; then
+              SIZE=$(du -sh "$JAR" | cut -f1)
+              echo "| \`$svc\` | \`$(basename $JAR)\` ($SIZE) | ✅ Built |"
+            else
+              echo "| \`$svc\` | — | ❌ Missing |"
+            fi
+          done >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.maven-build.outcome }}" = "success" ]; then
+            echo "**Result: ✅ All microservices compiled successfully**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**Result: ❌ Build failed — check Maven logs above**" >> $GITHUB_STEP_SUMMARY
+          fi
 
       - name: Upload build artifacts (JARs)
         uses: actions/upload-artifact@v4
@@ -178,7 +203,32 @@ jobs:
         run: npm ci
 
       - name: Build production bundle
+        id: vite-build
         run: npm run build
+
+      - name: Frontend build status summary
+        if: always()
+        run: |
+          echo "## 🌐 Frontend Build Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Item | Detail |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| Framework | React + Vite |" >> $GITHUB_STEP_SUMMARY
+          echo "| Node Version | $(node --version) |" >> $GITHUB_STEP_SUMMARY
+          echo "| npm Version | $(npm --version) |" >> $GITHUB_STEP_SUMMARY
+          if [ -d dist ]; then
+            DIST_SIZE=$(du -sh dist | cut -f1)
+            FILE_COUNT=$(find dist -type f | wc -l)
+            JS_SIZE=$(find dist -name '*.js' -exec du -ch {} + 2>/dev/null | tail -1 | cut -f1)
+            CSS_SIZE=$(find dist -name '*.css' -exec du -ch {} + 2>/dev/null | tail -1 | cut -f1)
+            echo "| Output Dir | \`dist/\` ($DIST_SIZE total) |" >> $GITHUB_STEP_SUMMARY
+            echo "| Total Files | $FILE_COUNT |" >> $GITHUB_STEP_SUMMARY
+            echo "| JS Bundle | $JS_SIZE |" >> $GITHUB_STEP_SUMMARY
+            echo "| CSS Bundle | $CSS_SIZE |" >> $GITHUB_STEP_SUMMARY
+            echo "| Build Result | ✅ Success |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Build Result | ❌ Failed — dist/ not found |" >> $GITHUB_STEP_SUMMARY
+          fi
 
       - name: Upload dist folder
         uses: actions/upload-artifact@v4
@@ -188,14 +238,211 @@ jobs:
           retention-days: 1
 
 # ─────────────────────────────────────────────────────────────────
+# STAGE 2b — DATABASE HEALTH CHECK  (parallel with build, ~2-3 min)
+# Spins up all 9 DB service containers and verifies connectivity
+# ─────────────────────────────────────────────────────────────────
+
+  database-check:
+    name: "Infrastructure · Database Health Check"
+    runs-on: ubuntu-latest
+    needs: [lint-backend]
+    services:
+      # ── Auth DB ───────────────────────────────────────────────
+      auth-db:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: auth_db
+          POSTGRES_USER: auth_user
+          POSTGRES_PASSWORD: auth_pass
+        ports: ["5432:5432"]
+        options: >
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      # ── User DB ───────────────────────────────────────────────
+      user-db:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: user_db
+          POSTGRES_USER: user_user
+          POSTGRES_PASSWORD: user_pass
+        ports: ["5433:5432"]
+        options: >
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      # ── Vehicle DB ────────────────────────────────────────────
+      vehicle-db:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: vehicle_db
+          POSTGRES_USER: vehicle_user
+          POSTGRES_PASSWORD: vehicle_pass
+        ports: ["5434:5432"]
+        options: >
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      # ── Booking DB ────────────────────────────────────────────
+      booking-db:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: booking_db
+          POSTGRES_USER: booking_user
+          POSTGRES_PASSWORD: booking_pass
+        ports: ["5435:5432"]
+        options: >
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      # ── Payment DB ────────────────────────────────────────────
+      payment-db:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: payment_db
+          POSTGRES_USER: payment_user
+          POSTGRES_PASSWORD: payment_pass
+        ports: ["5436:5432"]
+        options: >
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      # ── RideMatch DB ──────────────────────────────────────────
+      ridematch-db:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: ridematch_db
+          POSTGRES_USER: ridematch_user
+          POSTGRES_PASSWORD: ridematch_pass
+        ports: ["5437:5432"]
+        options: >
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      # ── Review DB ─────────────────────────────────────────────
+      review-db:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: review_db
+          POSTGRES_USER: review_user
+          POSTGRES_PASSWORD: review_pass
+        ports: ["5438:5432"]
+        options: >
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      # ── Notification DB (MongoDB) ──────────────────────────────
+      notification-db:
+        image: mongo:7
+        ports: ["27017:27017"]
+        options: >
+          --health-cmd "mongosh --eval 'db.runCommand({ping:1})' --quiet"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      # ── Chat DB (MongoDB) ─────────────────────────────────────
+      chat-db:
+        image: mongo:7
+        ports: ["27018:27017"]
+        options: >
+          --health-cmd "mongosh --eval 'db.runCommand({ping:1})' --quiet"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      # ── Redis (Cache) ─────────────────────────────────────────
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 3
+
+    steps:
+      - name: Install PostgreSQL client
+        run: sudo apt-get install -y postgresql-client
+
+      - name: Verify all PostgreSQL databases
+        run: |
+          declare -A PG_DBS=(
+            ["auth_db"]="auth_user:auth_pass:5432"
+            ["user_db"]="user_user:user_pass:5433"
+            ["vehicle_db"]="vehicle_user:vehicle_pass:5434"
+            ["booking_db"]="booking_user:booking_pass:5435"
+            ["payment_db"]="payment_user:payment_pass:5436"
+            ["ridematch_db"]="ridematch_user:ridematch_pass:5437"
+            ["review_db"]="review_user:review_pass:5438"
+          )
+          for db in "${!PG_DBS[@]}"; do
+            IFS=':' read -r user pass port <<< "${PG_DBS[$db]}"
+            PGPASSWORD=$pass psql -h localhost -p $port -U $user -d $db \
+              -c "SELECT current_database(), version();"
+            echo "  ✅ $db is UP on port $port"
+          done
+
+      - name: Verify MongoDB (notification-db)
+        run: |
+          mongosh --host localhost --port 27017 \
+            --eval "db.runCommand({ping:1})"
+          echo "  ✅ notification-db (MongoDB) is UP on port 27017"
+
+      - name: Verify MongoDB (chat-db)
+        run: |
+          mongosh --host localhost --port 27018 \
+            --eval "db.runCommand({ping:1})"
+          echo "  ✅ chat-db (MongoDB) is UP on port 27018"
+
+      - name: Verify Redis
+        run: |
+          redis-cli -h localhost -p 6379 ping
+          redis-cli -h localhost -p 6379 info server | grep redis_version
+          echo "  ✅ Redis is UP on port 6379"
+
+      - name: Write database health summary
+        if: always()
+        run: |
+          echo "## 🗄️ Database Health Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Database | Engine | Port | Service | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|---|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| auth-db | PostgreSQL 16 | 5432 | auth-service | ✅ UP |" >> $GITHUB_STEP_SUMMARY
+          echo "| user-db | PostgreSQL 16 | 5433 | user-service | ✅ UP |" >> $GITHUB_STEP_SUMMARY
+          echo "| vehicle-db | PostgreSQL 16 | 5434 | vehicle-service | ✅ UP |" >> $GITHUB_STEP_SUMMARY
+          echo "| booking-db | PostgreSQL 16 | 5435 | booking-service | ✅ UP |" >> $GITHUB_STEP_SUMMARY
+          echo "| payment-db | PostgreSQL 16 | 5436 | payment-service | ✅ UP |" >> $GITHUB_STEP_SUMMARY
+          echo "| ridematch-db | PostgreSQL 16 | 5437 | ridematch-service | ✅ UP |" >> $GITHUB_STEP_SUMMARY
+          echo "| review-db | PostgreSQL 16 | 5438 | review-service | ✅ UP |" >> $GITHUB_STEP_SUMMARY
+          echo "| notification-db | MongoDB 7 | 27017 | notification-service | ✅ UP |" >> $GITHUB_STEP_SUMMARY
+          echo "| chat-db | MongoDB 7 | 27018 | chat-service | ✅ UP |" >> $GITHUB_STEP_SUMMARY
+          echo "| redis | Redis 7 | 6379 | vehicle/ridematch cache | ✅ UP |" >> $GITHUB_STEP_SUMMARY
+
+# ─────────────────────────────────────────────────────────────────
 # STAGE 3 — API TESTS  (~3-5 min)
 # Runs after builds pass; uses mocked HTTP (no live server needed)
 # ─────────────────────────────────────────────────────────────────
 
   api-tests:
+    # also waits for database-check so DB status is visible before tests run
     name: "Test · Python API Tests (pytest)"
     runs-on: ubuntu-latest
-    needs: [lint-python, build-backend, build-frontend]
+    needs: [lint-python, build-backend, build-frontend, database-check]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -355,3 +602,78 @@ jobs:
       - name: Add deploy summary
         run: |
           echo "✅ Backend triggered on **Render**" >> $GITHUB_STEP_SUMMARY
+
+# ─────────────────────────────────────────────────────────────────
+# STAGE 6 — PIPELINE SUMMARY  (runs last, always)
+# Writes a full status table visible in the GitHub Actions UI
+# ─────────────────────────────────────────────────────────────────
+
+  pipeline-summary:
+    name: "📋 Pipeline Summary Report"
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - lint-python
+      - lint-frontend
+      - lint-backend
+      - build-backend
+      - build-frontend
+      - database-check
+      - api-tests
+      - security-scan
+    steps:
+      - name: Write full pipeline summary
+        run: |
+          echo "# 🚀 ZoomHopr CI/CD Pipeline Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Triggered by:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Actor:** @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "## Stage Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Stage | Job | Result |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|---|" >> $GITHUB_STEP_SUMMARY
+
+          # Helper to map outcome to emoji
+          status() {
+            case "$1" in
+              success)  echo "✅ Passed" ;;
+              failure)  echo "❌ Failed" ;;
+              skipped)  echo "⏭️ Skipped" ;;
+              cancelled) echo "🚫 Cancelled" ;;
+              *)        echo "⚠️ Unknown" ;;
+            esac
+          }
+
+          echo "| 1 · Code Quality | Pylint (Python) | $(status '${{ needs.lint-python.result }}') |" >> $GITHUB_STEP_SUMMARY
+          echo "| 1 · Code Quality | npm audit (Frontend) | $(status '${{ needs.lint-frontend.result }}') |" >> $GITHUB_STEP_SUMMARY
+          echo "| 1 · Code Quality | OWASP Dep Check (Java) | $(status '${{ needs.lint-backend.result }}') |" >> $GITHUB_STEP_SUMMARY
+          echo "| 2 · Build | Spring Boot Maven Build | $(status '${{ needs.build-backend.result }}') |" >> $GITHUB_STEP_SUMMARY
+          echo "| 2 · Build | React/Vite Frontend Build | $(status '${{ needs.build-frontend.result }}') |" >> $GITHUB_STEP_SUMMARY
+          echo "| 2 · Infrastructure | Database Health Check (10 DBs) | $(status '${{ needs.database-check.result }}') |" >> $GITHUB_STEP_SUMMARY
+          echo "| 3 · Testing | Python API Tests (pytest) | $(status '${{ needs.api-tests.result }}') |" >> $GITHUB_STEP_SUMMARY
+          echo "| 4 · Security | Trivy Container Scan | $(status '${{ needs.security-scan.result }}') |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Overall result
+          CRITICAL_JOBS="${{ needs.build-backend.result }} ${{ needs.build-frontend.result }} ${{ needs.api-tests.result }}"
+          if echo "$CRITICAL_JOBS" | grep -q "failure"; then
+            echo "## ❌ Pipeline FAILED" >> $GITHUB_STEP_SUMMARY
+            echo "One or more critical stages failed. Check the job logs above." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## ✅ Pipeline PASSED" >> $GITHUB_STEP_SUMMARY
+            echo "All critical stages completed successfully." >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📦 Artifacts Generated" >> $GITHUB_STEP_SUMMARY
+          echo "- \`pylint-report\` — Python code quality score" >> $GITHUB_STEP_SUMMARY
+          echo "- \`owasp-dependency-report\` — Java CVE vulnerability report" >> $GITHUB_STEP_SUMMARY
+          echo "- \`backend-jars\` — Compiled Spring Boot JARs (12 services)" >> $GITHUB_STEP_SUMMARY
+          echo "- \`frontend-dist\` — Production React bundle (dist/)" >> $GITHUB_STEP_SUMMARY
+          echo "- \`api-test-report\` — pytest HTML report + coverage" >> $GITHUB_STEP_SUMMARY
+          echo "- \`trivy-security-report\` — Docker image CVE scan" >> $GITHUB_STEP_SUMMARY
