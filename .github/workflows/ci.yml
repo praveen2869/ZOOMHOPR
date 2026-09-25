@@ -412,8 +412,12 @@ jobs:
           --health-retries 3
 
     steps:
-      - name: Install PostgreSQL client
-        run: sudo apt-get install -y postgresql-client
+      - name: Install required CLI tools
+        run: |
+          # PostgreSQL client for DB verification
+          sudo apt-get install -y postgresql-client netcat-openbsd
+          # pymongo for MongoDB connectivity check (no mongosh needed on runner)
+          pip install pymongo --quiet
 
       - name: Verify all PostgreSQL databases
         run: |
@@ -435,15 +439,35 @@ jobs:
 
       - name: Verify MongoDB (notification-db)
         run: |
-          mongosh --host localhost --port 27017 \
-            --eval "db.runCommand({ping:1})"
-          echo "  ✅ notification-db (MongoDB) is UP on port 27017"
+          # Step 1: check port is open using netcat (no mongosh needed on runner)
+          nc -z localhost 27017
+          echo "  ✅ notification-db port 27017 is reachable"
+
+          # Step 2: run a real ping using pymongo (Python is always available)
+          python3 - <<'EOF'
+          from pymongo import MongoClient
+          from pymongo.errors import ConnectionFailure
+          client = MongoClient("mongodb://localhost:27017", serverSelectionTimeoutMS=5000)
+          result = client.admin.command("ping")
+          print(f"  ✅ notification-db ping response: {result}")
+          client.close()
+          EOF
 
       - name: Verify MongoDB (chat-db)
         run: |
-          mongosh --host localhost --port 27018 \
-            --eval "db.runCommand({ping:1})"
-          echo "  ✅ chat-db (MongoDB) is UP on port 27018"
+          # Step 1: check port using netcat
+          nc -z localhost 27018
+          echo "  ✅ chat-db port 27018 is reachable"
+
+          # Step 2: pymongo ping
+          python3 - <<'EOF'
+          from pymongo import MongoClient
+          from pymongo.errors import ConnectionFailure
+          client = MongoClient("mongodb://localhost:27018", serverSelectionTimeoutMS=5000)
+          result = client.admin.command("ping")
+          print(f"  ✅ chat-db ping response: {result}")
+          client.close()
+          EOF
 
       - name: Verify Redis
         run: |
