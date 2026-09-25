@@ -31,11 +31,47 @@ jobs:
 
       - name: Run Pylint on test files
         run: |
+          # Run pylint and capture its native exit code.
+          # Pylint exit code is a BITMASK — any issue = non-zero:
+          #   0  = no issues at all
+          #   1  = fatal message
+          #   2  = error message
+          #   4  = warning message
+          #   8  = refactor message (e.g. R0801 duplicate-code)
+          #  16  = convention message (e.g. C0116 missing-docstring)
+          #  32  = usage error
+          # Values are ORed — so C0116+R0801 = 16+8 = exit code 24
+
+          set +e   # don't auto-exit so we can capture the code
           pylint tests/ \
             --rcfile=tests/.pylintrc \
             --output-format=colorized \
             --score=yes \
-            --fail-under=7.0
+            --msg-template="{path}:{line}: [{msg_id}({symbol})] {msg}" \
+            2>&1 | tee pylint-report.txt
+          PYLINT_EXIT=${PIPESTATUS[0]}
+          set -e
+
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Pylint exit code: $PYLINT_EXIT"
+
+          # Decode what the exit code means
+          if   [ $((PYLINT_EXIT & 1))  -ne 0 ]; then echo "  ❌ FATAL messages found"; fi
+          if   [ $((PYLINT_EXIT & 2))  -ne 0 ]; then echo "  ❌ ERROR messages found"; fi
+          if   [ $((PYLINT_EXIT & 4))  -ne 0 ]; then echo "  ⚠️  WARNING messages found"; fi
+          if   [ $((PYLINT_EXIT & 8))  -ne 0 ]; then echo "  🔁 REFACTOR messages found (e.g. duplicate code)"; fi
+          if   [ $((PYLINT_EXIT & 16)) -ne 0 ]; then echo "  📝 CONVENTION messages found (e.g. missing docstring)"; fi
+          if   [ $((PYLINT_EXIT & 32)) -ne 0 ]; then echo "  🚨 USAGE ERROR"; fi
+
+          if [ $PYLINT_EXIT -eq 0 ]; then
+            echo "  ✅ Pylint: ZERO issues found — pipeline continues"
+          else
+            echo "  ❌ Pylint found issues (exit $PYLINT_EXIT) — BLOCKING pipeline"
+            echo "     Fix all warnings/conventions above, then re-push."
+            exit $PYLINT_EXIT
+          fi
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         continue-on-error: false
 
       - name: Upload Pylint report
