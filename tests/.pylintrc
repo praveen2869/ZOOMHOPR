@@ -1,0 +1,27 @@
+[MASTER]
+jobs=1
+
+[FORMAT]
+max-line-length=100
+indent-string='    '
+
+[MESSAGES CONTROL]
+disable=
+    C0114,  # missing-module-docstring
+    C0115,  # missing-class-docstring
+    R0903,  # too-few-public-methods
+
+[DESIGN]
+max-args=8
+max-attributes=10
+max-bool-expr=5
+max-branches=12
+max-locals=15
+max-returns=6
+max-statements=50
+
+[SIMILARITIES]
+min-similarity-lines=6
+
+[TYPECHECK]
+generated-members=responses.add,responses.activate
